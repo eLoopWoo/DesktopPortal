@@ -23,9 +23,10 @@
         android:layout_height="wrap_content"
 
         />
+    <ImageView
+        android:id="@+id/screenshot"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        />
 
-    <VideoView
-        android:id="@+id/videoView"
-        android:layout_width="150dp"
-        android:layout_height="300dp" />
 </LinearLayout>
