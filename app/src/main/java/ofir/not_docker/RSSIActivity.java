@@ -13,6 +13,11 @@ import java.io.OutputStream;
 import android.bluetooth.BluetoothSocket;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorListener;
+import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.app.Activity;
@@ -58,7 +63,7 @@ import java.util.UUID;
 import static android.R.attr.data;
 import static android.R.attr.left;
 
-public class RSSIActivity extends Activity {
+public class RSSIActivity extends Activity   {
 
     private interface MessageConstants {
         public static final int MESSAGE_READ = 0;
@@ -80,6 +85,15 @@ public class RSSIActivity extends Activity {
     private Map<BluetoothDevice ,Integer > treeMap;
     final int MESSAGE_READ = 9999; // its only identifier to tell to handler what to do with data you passed through.
 
+    private static int shakeTime1 = 0;
+
+
+    private SensorManager mSensorManager;
+
+    private ShakeEventListener mSensorListener;
+
+    private static final int IMAGE_TRANSFER = 1;
+    private static final int FILE_TRANSFER = 2;
 
 
     @Override
@@ -97,6 +111,30 @@ public class RSSIActivity extends Activity {
 
         }
 
+
+
+        mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        mSensorListener = new ShakeEventListener();
+
+        mSensorListener.setOnShakeListener(new ShakeEventListener.OnShakeListener() {
+
+            public void onShake() {
+
+                int currTime =(int) (System.currentTimeMillis());
+                if(currTime-shakeTime1 < 2000){
+                    shakeTime1 = currTime;
+                    Log.d(TAG,"Already shaken");
+                }else{
+                    Log.d(TAG, "Device was shaken");
+                    shakeTime1 = currTime;
+                    RefreshConnections();
+                }
+
+            }
+        });
+
+
+
         registerReceiver(mReceiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
         screenShot = (ImageView) findViewById(R.id.screenshot);
         Button button = (Button) findViewById(R.id.button1);
@@ -106,42 +144,66 @@ public class RSSIActivity extends Activity {
         button.setOnClickListener(new OnClickListener() {
 
             public void onClick(View v) {
-                if (mBluetoothAdapter != null) {
-                    mBluetoothAdapter.startDiscovery();
-                } else {
-                    Toast.makeText(RSSIActivity.this, "Device has no bluetooth",
-                            Toast.LENGTH_LONG).show();
-                }
-                if (!mBluetoothAdapter.isEnabled()) {
-                    Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-                    startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
-                }
-
-                //stop scanning devices and try streamng to the strongest one
-                final Handler handler = new Handler();
-                handler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        //stop scanning after 5 seconds
-                        mBluetoothAdapter.cancelDiscovery();
-
-                        //sort bt map
-                        Comparator<BluetoothDevice> comparator = new ValueComparator(bt_list);
-                        //TreeMap is a map sorted by its keys.
-                        //The comparator is used to sort the TreeMap by keys.
-                        treeMap  = new TreeMap<BluetoothDevice, Integer>(comparator);
-                        treeMap.putAll(bt_list);
-
-
-                        ConnectToClosestBT();
-
-                    }
-                }, 5000);
-
+            RefreshConnections();
             }
         });
 
     }
+
+
+
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        mSensorManager.registerListener(mSensorListener,
+                mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+                SensorManager.SENSOR_DELAY_UI);
+    }
+
+    @Override
+    protected void onPause() {
+        mSensorManager.unregisterListener(mSensorListener);
+        super.onPause();
+    }
+
+
+
+    public void RefreshConnections(){
+        if (mBluetoothAdapter != null) {
+            mBluetoothAdapter.startDiscovery();
+        } else {
+            Toast.makeText(RSSIActivity.this, "Device has no bluetooth",
+                    Toast.LENGTH_LONG).show();
+        }
+        if (!mBluetoothAdapter.isEnabled()) {
+            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+        }
+
+        //stop scanning devices and try streamng to the strongest one
+        final Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                //stop scanning after 5 seconds
+                mBluetoothAdapter.cancelDiscovery();
+
+                //sort bt map
+                Comparator<BluetoothDevice> comparator = new ValueComparator(bt_list);
+                //TreeMap is a map sorted by its keys.
+                //The comparator is used to sort the TreeMap by keys.
+                treeMap  = new TreeMap<BluetoothDevice, Integer>(comparator);
+                treeMap.putAll(bt_list);
+
+
+                ConnectToClosestBT();
+
+            }
+        }, 5000);
+
+    }
+
     public void ConnectToClosestBT(){
         if(treeMap.entrySet().iterator().hasNext()){
             Map.Entry< BluetoothDevice , Integer> entry = treeMap.entrySet().iterator().next();
@@ -200,7 +262,8 @@ public class RSSIActivity extends Activity {
 
 
 
-    public void OnDataReceive(byte[] data, int length) {
+
+    public void OnBTDataReceive(byte[] data, int length) {
         String packet = "";
 
         if(msg_num == 0){
@@ -235,18 +298,22 @@ public class RSSIActivity extends Activity {
         if(msg_num ==2){
             Log.d(TAG, "starting p2p thread");
             RUN_SOCKET = true;
-            P2PThread p2pThread = new P2PThread();
+            P2PThread p2pThread = new P2PThread(IMAGE_TRANSFER);
             p2pThread.run();
         }
     }
     //a class that establishs a device connection
-    public class P2PThread extends Thread{
-        public void run(){
-            listenSocket(ip, port);
+    private class P2PThread extends Thread{
+        int protocolCode;
+        public  P2PThread(int protocolCode) {
+            this.protocolCode = protocolCode;
+        }
+        public void run () {
+            listenSocket(ip, port, protocolCode);
 
         }
     }
-    public  void listenSocket(String ip, int port){
+    public  void listenSocket(String ip, int port, int protocolCode){
 //Create socket connection
 
         try{
@@ -257,6 +324,8 @@ public class RSSIActivity extends Activity {
             DataInputStream in = new DataInputStream(socket.getInputStream());
             Log.d(TAG, "socket listen is " + String.valueOf(RUN_SOCKET));
 
+            //pictures
+            out.writeByte(protocolCode);
             //send data
             while (RUN_SOCKET) {
 
@@ -445,7 +514,7 @@ public class RSSIActivity extends Activity {
                     try {
                         // Read from the InputStream.
                         numBytes = mmInStream.read(mmBuffer);
-                        OnDataReceive(mmBuffer, numBytes);
+                        OnBTDataReceive(mmBuffer, numBytes);
                     } catch (IOException e) {
                         Log.d(TAG, "Input stream was disconnected", e);
                         break;
