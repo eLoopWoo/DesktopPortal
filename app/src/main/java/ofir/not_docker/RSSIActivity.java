@@ -372,7 +372,6 @@ public class RSSIActivity extends Activity   {
 
                         final Bitmap bmp = BitmapFactory.decodeByteArray(imageb, 0, length);
 
-
                         runOnUiThread(new Runnable() {
 
                             @Override
@@ -418,22 +417,23 @@ public class RSSIActivity extends Activity   {
 
 
                         // Create the byte array to hold the data
-                        byte[] bytes = new byte[(int)length];
+                        byte[] bytes = new byte[(int)4096];
 
                         // Read in the bytes
-                        int offset = 0;
                         int numRead = 0;
 
                         InputStream is = new FileInputStream(file);
                         int len;
-                        while ((len = in.read(bytes)) != -1) {
+                        int bytes_read_from_file = 0;
+                        while (bytes_read_from_file < length) {
+                            len = in.read(bytes);
+                            if (len == -1) {
+                                break;
+                            }
+                            bytes_read_from_file += len;
                             out.write(bytes, 0, len);
                         }
                         is.close();
-                        // Ensure all the bytes have been read in
-                        if (offset < bytes.length) {
-                            throw new IOException("Could not completely read file "+file.getName());
-                        }
 
 
                     }catch (IOException e){
