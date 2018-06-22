@@ -5,6 +5,7 @@ package ofir.not_docker;
 
 import java.io.BufferedReader;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -74,9 +75,9 @@ public class RSSIActivity extends Activity {
     private int port;
     static private TextView message;
     static public ImageView screenShot;
-    private Map<Integer, BluetoothDevice> bt_list = new HashMap<Integer, BluetoothDevice>();
+    private HashMap< BluetoothDevice, Integer> bt_list = new HashMap< BluetoothDevice, Integer>();
     private static int msg_num = 0;
-    private Map<Integer, BluetoothDevice> treeMap;
+    private Map<BluetoothDevice ,Integer > treeMap;
     final int MESSAGE_READ = 9999; // its only identifier to tell to handler what to do with data you passed through.
 
 
@@ -125,46 +126,28 @@ public class RSSIActivity extends Activity {
                         mBluetoothAdapter.cancelDiscovery();
 
                         //sort bt map
-                        treeMap = new TreeMap<Integer, BluetoothDevice>(
-                                new Comparator<Integer>() {
-
-                                    @Override
-                                    public int compare(Integer o1, Integer o2) {
-                                        return o2.compareTo(o1);
-                                    }
-
-                                });
-
+                        Comparator<BluetoothDevice> comparator = new ValueComparator(bt_list);
+                        //TreeMap is a map sorted by its keys.
+                        //The comparator is used to sort the TreeMap by keys.
+                        treeMap  = new TreeMap<BluetoothDevice, Integer>(comparator);
                         treeMap.putAll(bt_list);
+
+
                         ConnectToClosestBT();
 
                     }
                 }, 5000);
 
-
-
-
             }
         });
 
-        //start playing video
-        //"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
-    /*  VideoView videoView;
-        videoView = (VideoView) this.findViewById(R.id.videoView);
-        VideoThread vthread = new VideoThread(videoView, "rtsp://192.168.2.205/screenlive+audiodevice");
-        vthread.run();
-*/
-
-          /*  Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("rtsp://192.168.2.205/screenlive+audiodevice"));
-            startActivity(intent);
-*/
     }
     public void ConnectToClosestBT(){
         if(treeMap.entrySet().iterator().hasNext()){
-            Map.Entry<Integer, BluetoothDevice> entry = treeMap.entrySet().iterator().next();
-            Log.d(TAG, "Connecting to device " + entry.getValue().getName() + " with RSSI "
-                    + entry.getKey());
-            ConnectThread thread = new ConnectThread(entry.getValue());
+            Map.Entry< BluetoothDevice , Integer> entry = treeMap.entrySet().iterator().next();
+            Log.d(TAG, "Connecting to device " + entry.getKey().getName() + " with RSSI "
+                    + entry.getValue());
+            ConnectThread thread = new ConnectThread(entry.getKey());
             thread.run();
         }else{
             Log.d(TAG, "devices are empty, should restart descovery");
@@ -193,7 +176,7 @@ public class RSSIActivity extends Activity {
                 int rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE);
 
                 TextView rssi_msg = (TextView) findViewById(R.id.textView1);
-                bt_list.put(rssi, device);
+                bt_list.put( device, rssi);
 
 
 
@@ -270,8 +253,7 @@ public class RSSIActivity extends Activity {
             Log.d(TAG,"ip is: " + ip + " port is : " + port);
             Socket socket = new Socket(ip,port);
             //set up driver
-            PrintWriter out = new PrintWriter(socket.getOutputStream(),
-                    true);
+            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
             DataInputStream in = new DataInputStream(socket.getInputStream());
             Log.d(TAG, "socket listen is " + String.valueOf(RUN_SOCKET));
 
@@ -382,6 +364,7 @@ public class RSSIActivity extends Activity {
                 try {
                     Log.d(TAG, "device those not provide necessery service");
                     treeMap.remove(mmDevice);
+                    ConnectToClosestBT();
                     mmSocket.close();
                 } catch (IOException closeException) {
                     Log.e(TAG, "Could not close the client socket", closeException);
