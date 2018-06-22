@@ -6,10 +6,14 @@ package ofir.not_docker;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+
+import android.Manifest;
 import android.bluetooth.BluetoothSocket;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -30,6 +34,7 @@ import android.content.IntentFilter;
 import android.os.Handler;
 import android.os.Message;
 import android.os.StrictMode;
+import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.Menu;
 import android.view.View;
@@ -110,6 +115,8 @@ public class RSSIActivity extends Activity   {
             //your codes here
 
         }
+        ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, 1001); //Any number
+
 
 
 
@@ -260,7 +267,11 @@ public class RSSIActivity extends Activity   {
         unregisterReceiver(mReceiver);
     }
 
-
+    public void OnFileTransfer(File file){
+        Log.d(TAG, "Received file");
+        P2PThread p2PThread = new P2PThread(FILE_TRANSFER, file);
+        p2PThread.start();
+    }
 
 
     public void OnBTDataReceive(byte[] data, int length) {
@@ -298,22 +309,24 @@ public class RSSIActivity extends Activity   {
         if(msg_num ==2){
             Log.d(TAG, "starting p2p thread");
             RUN_SOCKET = true;
-            P2PThread p2pThread = new P2PThread(IMAGE_TRANSFER);
+            P2PThread p2pThread = new P2PThread(IMAGE_TRANSFER, null);
             p2pThread.run();
         }
     }
     //a class that establishs a device connection
     private class P2PThread extends Thread{
         int protocolCode;
-        public  P2PThread(int protocolCode) {
+        File file;
+        public  P2PThread(int protocolCode, File file) {
             this.protocolCode = protocolCode;
+            this.file = file;
         }
         public void run () {
-            listenSocket(ip, port, protocolCode);
+            listenSocket(ip, port, protocolCode, file);
 
         }
     }
-    public  void listenSocket(String ip, int port, int protocolCode){
+    public  void listenSocket(String ip, int port, int protocolCode, File file){
 //Create socket connection
 
         try{
@@ -324,59 +337,114 @@ public class RSSIActivity extends Activity   {
             DataInputStream in = new DataInputStream(socket.getInputStream());
             Log.d(TAG, "socket listen is " + String.valueOf(RUN_SOCKET));
 
-            //pictures
             out.writeByte(protocolCode);
-            //send data
-            while (RUN_SOCKET) {
 
-                //Log.d(TAG, "listening...");
-                try {
-                    byte[] bb = new byte[4];
-                    in.read(bb, 0, 4);
-                    int b1 =  Integer.parseInt(String.format("%02X", bb[0]), 16);
-                    int b2 =  Integer.parseInt(String.format("%02X", bb[1]), 16);
-                    int b3 =  Integer.parseInt(String.format("%02X", bb[2]), 16);
-                    int b4 =  Integer.parseInt(String.format("%02X", bb[3]), 16);
+            if(protocolCode == IMAGE_TRANSFER){
+                while (RUN_SOCKET) {
 
-                    int length = b4;
-                    length = length << 8;
-                    length += b3;
-                    length = length << 8;
-                    length += b2;
-                    length = length << 8;
-                    length += b1;
-                  //  Log.d(TAG, "image length is:" + length);
+                    //Log.d(TAG, "listening...");
+                    try {
+                        byte[] bb = new byte[4];
+                        in.read(bb, 0, 4);
+                        int b1 =  Integer.parseInt(String.format("%02X", bb[0]), 16);
+                        int b2 =  Integer.parseInt(String.format("%02X", bb[1]), 16);
+                        int b3 =  Integer.parseInt(String.format("%02X", bb[2]), 16);
+                        int b4 =  Integer.parseInt(String.format("%02X", bb[3]), 16);
 
-                    byte[] imageb = new byte[length];
-                    int CHUNK_SIZE = 4096;
-                    int already_read = 0;
-                    while (already_read < length) {
-                        int left_to_read = length - already_read >= CHUNK_SIZE ?
-                                CHUNK_SIZE : length - already_read;
-                        already_read += in.read(imageb, already_read, left_to_read);
-                    }
+                        int length = b4;
+                        length = length << 8;
+                        length += b3;
+                        length = length << 8;
+                        length += b2;
+                        length = length << 8;
+                        length += b1;
+                        //  Log.d(TAG, "image length is:" + length);
+
+                        byte[] imageb = new byte[length];
+                        int CHUNK_SIZE = 4096;
+                        int already_read = 0;
+                        while (already_read < length) {
+                            int left_to_read = length - already_read >= CHUNK_SIZE ?
+                                    CHUNK_SIZE : length - already_read;
+                            already_read += in.read(imageb, already_read, left_to_read);
+                        }
 //                    Log.d(TAG, "already_read: " + already_read);
 
-                    final Bitmap bmp = BitmapFactory.decodeByteArray(imageb, 0, length);
+                        final Bitmap bmp = BitmapFactory.decodeByteArray(imageb, 0, length);
 
 
-                    runOnUiThread(new Runnable() {
+                        runOnUiThread(new Runnable() {
 
-                        @Override
-                        public void run() {
+                            @Override
+                            public void run() {
 
-                            screenShot.setImageBitmap(Bitmap.createScaledBitmap(bmp, bmp.getWidth(),
-                                    bmp.getHeight(), false));
+                                screenShot.setImageBitmap(Bitmap.createScaledBitmap(bmp, bmp.getWidth(),
+                                        bmp.getHeight(), false));
 
-                        }
-                    });
+                            }
+                        });
 
-                } catch (IOException e) {
-                    Log.d(TAG, "Read failed");
-                    break;
-                    //System.exit(1);
+                    } catch (IOException e) {
+                        Log.d(TAG, "Read failed");
+                        break;
+                        //System.exit(1);
+                    }
                 }
+            }else{
+                if(protocolCode == FILE_TRANSFER){
+                    // Returns the contents of the file in a byte array.
+                    try {
+                        // Get the size of the file
+                        long length = file.length();
+
+                        // You cannot create an array using a long type.
+                        // It needs to be an int type.
+                        // Before converting to an int type, check
+                        // to ensure that file is not larger than Integer.MAX_VALUE.
+                        if (length > Integer.MAX_VALUE) {
+                            // File is too large
+                            throw new IOException("File is too large!");
+                        }
+                        //send length through socket
+                        out.writeLong(length);
+                        String name = file.getName();
+
+                        //write name length to the file
+                        out.write(name.length());
+
+                        //write file name
+                        byte[] fileName = name.getBytes();
+                        out.write(fileName);
+
+
+                        // Create the byte array to hold the data
+                        byte[] bytes = new byte[(int)length];
+
+                        // Read in the bytes
+                        int offset = 0;
+                        int numRead = 0;
+
+                        InputStream is = new FileInputStream(file);
+                        int len;
+                        while ((len = in.read(bytes)) != -1) {
+                            out.write(bytes, 0, len);
+                        }
+                        is.close();
+                        // Ensure all the bytes have been read in
+                        if (offset < bytes.length) {
+                            throw new IOException("Could not completely read file "+file.getName());
+                        }
+
+
+                    }catch (IOException e){
+                        Log.e(TAG, "file I/O exception" + e.getMessage());
+
+                    }
+                }
+                out.close();
+                in.close();
             }
+
             
             if(!socket.isClosed()){
                 socket.close();
