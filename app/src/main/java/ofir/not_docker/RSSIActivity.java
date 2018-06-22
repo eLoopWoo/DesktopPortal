@@ -45,11 +45,13 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 import static android.R.attr.data;
@@ -64,17 +66,17 @@ public class RSSIActivity extends Activity {
 
         // ... (Add other message types here as needed.)
     }
-
+    public static volatile  boolean RUN_SOCKET = true;
     public static final String TAG = "BT application";
     private static final int REQUEST_ENABLE_BT = 1;
     private BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-     private String ip;
-     private int port;
-     static private TextView message;
-     static public ImageView screenShot;
-    private Map<BluetoothDevice, Integer> bt_list = new HashMap<BluetoothDevice, Integer>();
+    private String ip;
+    private int port;
+    static private TextView message;
+    static public ImageView screenShot;
+    private Map<Integer, BluetoothDevice> bt_list = new HashMap<Integer, BluetoothDevice>();
     private static int msg_num = 0;
-
+    private Map<Integer, BluetoothDevice> treeMap;
     final int MESSAGE_READ = 9999; // its only identifier to tell to handler what to do with data you passed through.
 
 
@@ -115,16 +117,29 @@ public class RSSIActivity extends Activity {
                 }
 
                 //stop scanning devices and try streamng to the strongest one
-             /*   final Handler handler = new Handler();
+                final Handler handler = new Handler();
                 handler.postDelayed(new Runnable() {
                     @Override
                     public void run() {
                         //stop scanning after 5 seconds
-                        //mBluetoothAdapter.cancelDiscovery();
+                        mBluetoothAdapter.cancelDiscovery();
 
                         //sort bt map
+                        treeMap = new TreeMap<Integer, BluetoothDevice>(
+                                new Comparator<Integer>() {
+
+                                    @Override
+                                    public int compare(Integer o1, Integer o2) {
+                                        return o2.compareTo(o1);
+                                    }
+
+                                });
+
+                        treeMap.putAll(bt_list);
+                        ConnectToClosestBT();
+
                     }
-                }, 5000);*/
+                }, 5000);
 
 
 
@@ -144,7 +159,17 @@ public class RSSIActivity extends Activity {
             startActivity(intent);
 */
     }
-
+    public void ConnectToClosestBT(){
+        if(treeMap.entrySet().iterator().hasNext()){
+            Map.Entry<Integer, BluetoothDevice> entry = treeMap.entrySet().iterator().next();
+            Log.d(TAG, "Connecting to device " + entry.getValue().getName() + " with RSSI "
+                    + entry.getKey());
+            ConnectThread thread = new ConnectThread(entry.getValue());
+            thread.run();
+        }else{
+            Log.d(TAG, "devices are empty, should restart descovery");
+        }
+    }
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.activity_rssi, menu);
@@ -168,14 +193,12 @@ public class RSSIActivity extends Activity {
                 int rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE);
 
                 TextView rssi_msg = (TextView) findViewById(R.id.textView1);
-                //bt_list.put(device, rssi);
+                bt_list.put(rssi, device);
 
-                ConnectThread thread = new ConnectThread(device);
-                thread.run();
+
 
                 rssi_msg.setText(rssi_msg.getText() + name + "[" + deviceHardwareAddress + "]" + " => " + rssi + "dBm\n");
-                Toast.makeText(RSSIActivity.this, rssi_msg.getText() + name + " => " + rssi + "dBm\n",
-                        Toast.LENGTH_LONG).show();
+
             }
         }
 
@@ -227,6 +250,8 @@ public class RSSIActivity extends Activity {
 
         msg_num++;
         if(msg_num ==2){
+            Log.d(TAG, "starting p2p thread");
+            RUN_SOCKET = true;
             P2PThread p2pThread = new P2PThread();
             p2pThread.run();
         }
@@ -236,7 +261,6 @@ public class RSSIActivity extends Activity {
         public void run(){
             listenSocket(ip, port);
 
-
         }
     }
     public  void listenSocket(String ip, int port){
@@ -244,17 +268,17 @@ public class RSSIActivity extends Activity {
 
         try{
             Log.d(TAG,"ip is: " + ip + " port is : " + port);
-
             Socket socket = new Socket(ip,port);
             //set up driver
             PrintWriter out = new PrintWriter(socket.getOutputStream(),
                     true);
             DataInputStream in = new DataInputStream(socket.getInputStream());
+            Log.d(TAG, "socket listen is " + String.valueOf(RUN_SOCKET));
 
             //send data
-            while (true) {
+            while (RUN_SOCKET) {
 
-
+                //Log.d(TAG, "listening...");
                 try {
                     byte[] bb = new byte[4];
                     in.read(bb, 0, 4);
@@ -262,11 +286,6 @@ public class RSSIActivity extends Activity {
                     int b2 =  Integer.parseInt(String.format("%02X", bb[1]), 16);
                     int b3 =  Integer.parseInt(String.format("%02X", bb[2]), 16);
                     int b4 =  Integer.parseInt(String.format("%02X", bb[3]), 16);
-                    Log.d(TAG, "byte is : " + b1);
-                    Log.d(TAG, "byte is : " + b2);
-
-                    Log.d(TAG, "byte is : " + b3);
-                    Log.d(TAG, "byte is : " + b4);
 
                     int length = b4;
                     length = length << 8;
@@ -275,7 +294,7 @@ public class RSSIActivity extends Activity {
                     length += b2;
                     length = length << 8;
                     length += b1;
-                    Log.d(TAG, "image length is:" + length);
+                  //  Log.d(TAG, "image length is:" + length);
 
                     byte[] imageb = new byte[length];
                     int CHUNK_SIZE = 4096;
@@ -285,7 +304,7 @@ public class RSSIActivity extends Activity {
                                 CHUNK_SIZE : length - already_read;
                         already_read += in.read(imageb, already_read, left_to_read);
                     }
-                    Log.d(TAG, "already_read: " + already_read);
+//                    Log.d(TAG, "already_read: " + already_read);
 
                     final Bitmap bmp = BitmapFactory.decodeByteArray(imageb, 0, length);
 
@@ -307,6 +326,11 @@ public class RSSIActivity extends Activity {
                     //System.exit(1);
                 }
             }
+            
+            if(!socket.isClosed()){
+                socket.close();
+
+            }
         } catch (UnknownHostException e) {
             Log.d(TAG, "Unknown host: " + ip);
             //System.exit(1);
@@ -314,28 +338,9 @@ public class RSSIActivity extends Activity {
             Log.d(TAG, "No I/O");
             //System.exit(1);
         }
-
     }
 
-
-    private class VideoThread extends Thread{
-            VideoView videoView;
-            String videoRtspUrl;
-        public VideoThread( VideoView videoView, String url){
-            //video stream
-
-            videoRtspUrl=url;
-            this.videoView = videoView;
-            videoView.setVideoPath(videoRtspUrl);
-
-
-        }
-        public void run(){
-            videoView.requestFocus();
-            videoView.start();
-        }
-    }
-
+    //create a
     private class ConnectThread extends Thread {
         private final BluetoothSocket mmSocket;
         private final BluetoothDevice mmDevice;
@@ -344,7 +349,7 @@ public class RSSIActivity extends Activity {
 
 
 
-
+        //create socket with bt device
         public ConnectThread(BluetoothDevice device) {
             // Use a temporary object that is later assigned to mmSocket
             // because mmSocket is final.
@@ -375,10 +380,13 @@ public class RSSIActivity extends Activity {
             } catch (IOException connectException) {
                 // Unable to connect; close the socket and return.
                 try {
+                    Log.d(TAG, "device those not provide necessery service");
+                    treeMap.remove(mmDevice);
                     mmSocket.close();
                 } catch (IOException closeException) {
                     Log.e(TAG, "Could not close the client socket", closeException);
                 }
+
                 return;
             }
 
@@ -426,7 +434,8 @@ public class RSSIActivity extends Activity {
                 mmSocket = socket;
                 InputStream tmpIn = null;
                 OutputStream tmpOut = null;
-
+                msg_num = 0;
+                RUN_SOCKET = false;
                 // Get the input and output streams; using temp objects because
                 // member streams are final.
                 try {
